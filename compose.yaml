@@ -1,0 +1,6 @@
+services:
+  newfolder:
+    image: newfolder
+    build:
+      context: .
+      dockerfile: ./Dockerfile

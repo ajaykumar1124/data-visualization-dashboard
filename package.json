@@ -1,0 +1,15 @@
+{
+  "name": "data-visualization-dashboard-main",
+  "version": "1.0.0",
+  "description": "A comprehensive Python-based analytics solution that transforms raw data into actionable insights in under 5 minutes. Built with Streamlit, Pandas, Matplotlib, Seaborn, and Plotly for academic and business stakeholders.",
+  "main": "index.js",
+  "scripts": {
+    "dev": "python -m streamlit run dashboard.py",
+    "start": "python -m streamlit run dashboard.py",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}
