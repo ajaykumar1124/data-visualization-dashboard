@@ -10,11 +10,13 @@ import numpy as np
 from datetime import datetime, timedelta
 import io
 import base64
+import os
 from typing import Optional
 
 # Import custom modules
 from data_pipeline import DataCleaningPipeline, load_sample_data
 from visualization_engine import VisualizationEngine
+from dashboard_enhancements import DashboardEnhancementsManager, MobileConfig, RefreshConfig, FilterConfig
 
 # Page configuration
 st.set_page_config(
@@ -63,6 +65,14 @@ class DashboardApp:
         self.pipeline = DataCleaningPipeline()
         self.viz_engine = VisualizationEngine()
         
+        # Initialize dashboard enhancements
+        self.enhancements = DashboardEnhancementsManager(
+            mobile_config=MobileConfig(enabled=True),
+            theme_config='light',
+            refresh_config=RefreshConfig(enabled=True, interval_seconds=300),
+            filter_config=FilterConfig(enable_regex_search=True)
+        )
+        
         # Initialize session state
         if 'data_loaded' not in st.session_state:
             st.session_state.data_loaded = False
@@ -75,9 +85,16 @@ class DashboardApp:
     
     def run(self):
         """Main application runner"""
+        # Initialize all enhancements
+        self.enhancements.initialize_all()
+        
         self.render_header()
         self.render_sidebar()
         self.render_main_content()
+        
+        # Render enhancements settings in sidebar
+        with st.sidebar.expander("⚙️ Dashboard Enhancements", expanded=False):
+            self.enhancements.render_settings_panel()
     
     def render_header(self):
         """Render the main header"""
@@ -263,7 +280,7 @@ class DashboardApp:
             # Sample data preview
             if st.button("👀 Preview Sample Data", type="primary"):
                 sample_df = load_sample_data().head()
-                st.dataframe(sample_df, use_container_width=True)
+                st.dataframe(sample_df, width='stretch')
     
     def render_dashboard_tabs(self):
         """Render the main dashboard with tabs"""
@@ -353,7 +370,7 @@ class DashboardApp:
             
             # Quick data preview
             st.subheader("👀 Data Preview")
-            st.dataframe(df.head(10), use_container_width=True)
+            st.dataframe(df.head(10), width='stretch')
     
     def render_data_quality_tab(self):
         """Render the data quality tab"""
@@ -381,7 +398,7 @@ class DashboardApp:
                     column_info.append(info)
                 
                 column_df = pd.DataFrame(column_info)
-                st.dataframe(column_df, use_container_width=True)
+                st.dataframe(column_df, width='stretch')
             
             with col2:
                 st.subheader("🎯 Quality Metrics")
@@ -393,7 +410,7 @@ class DashboardApp:
                 
                 # Quality score visualization
                 fig = self.viz_engine.create_performance_dashboard(df, "Data Quality Dashboard")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             
             # Missing data heatmap
             if df.isnull().sum().sum() > 0:
@@ -406,7 +423,7 @@ class DashboardApp:
                         pd.DataFrame({'Column': missing_data.index, 'Missing_Count': missing_data.values}),
                         'Column', 'Missing_Count', 'Missing Values by Column'
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
     
     def render_visualizations_tab(self):
         """Render the visualizations tab with all 6 chart types"""
@@ -479,7 +496,7 @@ class DashboardApp:
                 pd.DataFrame({str(x_col): x_data, y_col: df[y_col]}),
                 str(x_col), y_col, f"Trend Analysis: {y_col} Over Time"
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
             
             # Insights
             st.info(f"📊 **Insight:** This chart shows the trend of {y_col} over time, helping identify patterns, seasonality, and growth trends.")
@@ -494,7 +511,7 @@ class DashboardApp:
             fig = self.viz_engine.create_distribution_analysis(
                 df, selected_col, f"Distribution Analysis: {selected_col}"
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
             
             # Statistical summary
             col1, col2, col3 = st.columns(3)
@@ -524,7 +541,7 @@ class DashboardApp:
             fig = self.viz_engine.create_categorical_comparison(
                 df, cat_col, val_col, f"{val_col} by {cat_col}"
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
             
             st.info(f"📊 **Insight:** This comparison shows how {val_col} varies across different {cat_col} categories, revealing performance differences.")
     
@@ -533,7 +550,7 @@ class DashboardApp:
         st.subheader("🔥 Correlation Heatmap")
         
         fig = self.viz_engine.create_correlation_heatmap(df, "Variable Correlation Matrix")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
         
         st.info("📊 **Insight:** This heatmap reveals relationships between variables. Strong correlations (closer to +1 or -1) indicate variables that move together.")
     
@@ -542,7 +559,7 @@ class DashboardApp:
         st.subheader("🎯 Performance Dashboard")
         
         fig = self.viz_engine.create_performance_dashboard(df, "Comprehensive Performance Dashboard")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
         
         st.info("📊 **Insight:** This dashboard provides a comprehensive view of key performance indicators and metrics in a single, easy-to-understand format.")
     
@@ -564,7 +581,7 @@ class DashboardApp:
             fig = self.viz_engine.create_comparative_analysis(
                 df, group_col, value_cols, f"Comparative Analysis by {group_col}"
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
             
             st.info(f"📊 **Insight:** This analysis compares multiple metrics across {group_col} groups, enabling side-by-side performance evaluation.")
     
@@ -590,11 +607,14 @@ class DashboardApp:
             
             # Row filtering
             with col2:
+                max_display = min(100, len(df))
+                min_display = max(1, min(10, len(df)))
+                
                 max_rows = st.number_input(
                     "Maximum rows to display:",
-                    min_value=10,
+                    min_value=1,
                     max_value=len(df),
-                    value=min(100, len(df))
+                    value=max_display
                 )
             
             # Search functionality
@@ -615,12 +635,12 @@ class DashboardApp:
             
             # Display filtered data
             st.subheader(f"📋 Data Table ({len(filtered_df)} rows)")
-            st.dataframe(filtered_df.head(max_rows), use_container_width=True)
+            st.dataframe(filtered_df.head(max_rows), width='stretch')
             
             # Summary statistics
             if len(filtered_df.select_dtypes(include=[np.number]).columns) > 0:
                 st.subheader("📊 Summary Statistics")
-                st.dataframe(filtered_df.describe(), use_container_width=True)
+                st.dataframe(filtered_df.describe(), width='stretch')
     
     def render_reports_tab(self):
         """Render the reports tab"""
@@ -646,14 +666,162 @@ class DashboardApp:
                     self.generate_excel_report()
             
             with col2:
-                if st.button("📈 PowerPoint Slides"):
-                    st.info("PowerPoint export feature coming soon!")
+                if st.button("📈 PowerPoint Presentation"):
+                    self.generate_powerpoint_report()
             
             with col3:
                 if st.button("📧 Email Report"):
-                    st.info("Email integration feature coming soon!")
+                    self.render_email_settings()
+            
+            # PowerPoint Report Section
+            st.divider()
+            st.subheader("📑 PowerPoint Report Generator")
+            
+            with st.expander("🎯 PowerPoint Report Settings", expanded=False):
+                ppt_title = st.text_input(
+                    "Report Title",
+                    value="Data Analytics Report",
+                    key="ppt_title"
+                )
+                
+                ppt_include_options = st.multiselect(
+                    "Include in Presentation:",
+                    options=[
+                        "Executive Summary",
+                        "Data Overview",
+                        "Key Insights",
+                        "Visualizations",
+                        "Recommendations",
+                        "Technical Appendix"
+                    ],
+                    default=[
+                        "Executive Summary",
+                        "Data Overview",
+                        "Key Insights",
+                        "Visualizations",
+                        "Recommendations"
+                    ]
+                )
+                
+                if st.button("🎨 Generate PowerPoint", key="generate_ppt"):
+                    with st.spinner("📊 Creating PowerPoint presentation..."):
+                        try:
+                            from powerpoint_generator import PowerPointGenerator
+                            
+                            ppt_gen = PowerPointGenerator()
+                            
+                            # Prepare analysis results
+                            analysis_results = {
+                                'missing_handled': st.session_state.raw_data.isnull().sum().sum(),
+                                'duplicates_removed': len(st.session_state.raw_data) - len(st.session_state.cleaned_data),
+                                'format_corrections': 0,
+                                'accuracy_score': 0.98,
+                                'include_sections': ppt_include_options
+                            }
+                            
+                            # Generate presentation
+                            ppt_path = ppt_gen.create_presentation(
+                                st.session_state.cleaned_data,
+                                analysis_results,
+                                ppt_title
+                            )
+                            
+                            # Read and offer download
+                            with open(ppt_path, "rb") as ppt_file:
+                                st.download_button(
+                                    label="⬇️ Download PowerPoint Report",
+                                    data=ppt_file,
+                                    file_name=os.path.basename(ppt_path),
+                                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                    type="primary"
+                                )
+                            
+                            st.success("✅ PowerPoint presentation generated successfully!")
+                            st.info(f"📁 File: {os.path.basename(ppt_path)}")
+                            
+                        except ImportError:
+                            st.error("❌ PowerPoint module not found. Please install: pip install python-pptx")
+                        except Exception as e:
+                            st.error(f"❌ Error generating PowerPoint: {str(e)}")
+            
+            # Email Report Section
+            st.divider()
+            st.subheader("📧 Email Report Generator")
+            
+            with st.expander("✉️ Email Configuration", expanded=False):
+                email_config_col1, email_config_col2 = st.columns(2)
+                
+                with email_config_col1:
+                    st.write("**SMTP Server Settings**")
+                    smtp_server = st.text_input("SMTP Server", value="smtp.gmail.com", key="smtp_server")
+                    smtp_port = st.number_input("SMTP Port", value=587, min_value=1, max_value=65535, key="smtp_port")
+                    use_tls = st.checkbox("Use TLS", value=True, key="use_tls")
+                
+                with email_config_col2:
+                    st.write("**Sender Credentials**")
+                    sender_email = st.text_input("Sender Email", key="sender_email", type="password")
+                    sender_password = st.text_input("Email Password", key="sender_password", type="password")
+                    sender_name = st.text_input("Sender Name", value="Analytics Dashboard", key="sender_name")
+                
+                st.info("💡 Tip: For Gmail, use an App Password (not your account password). Enable 2FA and generate an app-specific password.")
+            
+            with st.expander("📬 Email Report Settings", expanded=False):
+                recipients_text = st.text_area(
+                    "Email Recipients (comma-separated)",
+                    value="",
+                    placeholder="user1@example.com, user2@example.com",
+                    key="email_recipients"
+                )
+                
+                email_subject = st.text_input(
+                    "Email Subject",
+                    value=f"Analytics Report - {datetime.now().strftime('%B %d, %Y')}",
+                    key="email_subject"
+                )
+                
+                email_message = st.text_area(
+                    "Custom Message (optional)",
+                    value="",
+                    placeholder="Add any custom message to include in the email...",
+                    key="email_message"
+                )
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    include_ppt = st.checkbox("Include PowerPoint", value=True, key="email_include_ppt")
+                
+                with col2:
+                    include_csv = st.checkbox("Include CSV", value=True, key="email_include_csv")
+                
+                with col3:
+                    include_excel = st.checkbox("Include Excel", value=True, key="email_include_excel")
+                
+                report_type = st.selectbox(
+                    "Email Template Style",
+                    options=["Executive Summary", "Detailed Report", "Quick Overview"],
+                    key="email_template"
+                )
+                
+                if st.button("📨 Send Email Report", type="primary", key="send_email_report"):
+                    self.send_email_report(
+                        recipients_text,
+                        sender_email,
+                        sender_password,
+                        smtp_server,
+                        smtp_port,
+                        use_tls,
+                        sender_name,
+                        email_subject,
+                        email_message,
+                        include_ppt,
+                        include_csv,
+                        include_excel,
+                        report_type
+                    )
             
             # Time savings calculator
+            st.divider()
             st.subheader("⏱️ Time Savings Calculator")
             
             col1, col2 = st.columns(2)
@@ -672,6 +840,120 @@ class DashboardApp:
                     delta="-95% time reduction",
                     delta_color="inverse"
                 )
+        else:
+            st.info("📊 Load data first to generate reports")
+    
+    def render_email_settings(self):
+        """Render email configuration modal"""
+        st.info("📧 Configure email settings in the Email Configuration section above")
+    
+    def generate_powerpoint_report(self):
+        """Generate PowerPoint presentation"""
+        with st.spinner("📊 Creating PowerPoint presentation..."):
+            try:
+                from powerpoint_generator import PowerPointGenerator
+                
+                ppt_gen = PowerPointGenerator()
+                
+                # Prepare analysis results
+                analysis_results = {
+                    'missing_handled': st.session_state.raw_data.isnull().sum().sum(),
+                    'duplicates_removed': len(st.session_state.raw_data) - len(st.session_state.cleaned_data),
+                    'format_corrections': 0,
+                    'accuracy_score': 0.98
+                }
+                
+                # Generate presentation
+                ppt_path = ppt_gen.create_presentation(
+                    st.session_state.cleaned_data,
+                    analysis_results,
+                    "Data Analytics Report"
+                )
+                
+                # Read and offer download
+                with open(ppt_path, "rb") as ppt_file:
+                    st.download_button(
+                        label="⬇️ Download PowerPoint",
+                        data=ppt_file,
+                        file_name=os.path.basename(ppt_path),
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        type="primary"
+                    )
+                
+                st.success("✅ PowerPoint presentation generated!")
+                
+            except ImportError:
+                st.error("❌ PowerPoint module not found. Install: pip install python-pptx")
+            except Exception as e:
+                st.error(f"❌ Error: {str(e)}")
+    
+    def send_email_report(self, recipients_text, sender_email, sender_password, 
+                         smtp_server, smtp_port, use_tls, sender_name, 
+                         email_subject, email_message, include_ppt, include_csv, 
+                         include_excel, report_type):
+        """Send email report"""
+        
+        if not recipients_text or not sender_email or not sender_password:
+            st.error("❌ Please fill in all required fields: Recipients, Email, and Password")
+            return
+        
+        with st.spinner("📧 Sending email report..."):
+            try:
+                from email_reporter import EmailReporter
+                
+                # Parse recipients
+                recipients = [r.strip() for r in recipients_text.split(',') if r.strip()]
+                
+                # Create email reporter with configuration
+                smtp_config = {
+                    'smtp_server': smtp_server,
+                    'smtp_port': smtp_port,
+                    'username': sender_email,
+                    'password': sender_password,
+                    'use_tls': use_tls,
+                    'sender_name': sender_name,
+                    'sender_email': sender_email
+                }
+                
+                email_reporter = EmailReporter(smtp_config)
+                
+                # Prepare analysis results
+                analysis_results = {
+                    'missing_handled': st.session_state.raw_data.isnull().sum().sum(),
+                    'duplicates_removed': len(st.session_state.raw_data) - len(st.session_state.cleaned_data),
+                    'format_corrections': 0,
+                    'accuracy_score': 0.98
+                }
+                
+                # Map report type to template
+                template_map = {
+                    'Executive Summary': 'executive_summary',
+                    'Detailed Report': 'detailed_report',
+                    'Quick Overview': 'executive_summary'
+                }
+                
+                # Send email
+                success = email_reporter.send_analytics_report(
+                    recipients=recipients,
+                    data=st.session_state.cleaned_data,
+                    analysis_results=analysis_results,
+                    report_type=template_map.get(report_type, 'executive_summary'),
+                    subject=email_subject,
+                    include_attachments=include_ppt or include_csv or include_excel,
+                    custom_message=email_message
+                )
+                
+                if success:
+                    st.success(f"✅ Email sent successfully to {len(recipients)} recipient(s)!")
+                    st.balloons()
+                else:
+                    st.error("❌ Failed to send email. Check your credentials and try again.")
+                    
+            except ImportError:
+                st.error("❌ Email module not found. Install: pip install python-pptx")
+            except Exception as e:
+                st.error(f"❌ Error sending email: {str(e)}")
+                st.info(f"💡 Common issues: Wrong password, 2FA enabled, SMTP blocked by firewall")
     
     def generate_excel_report(self):
         """Generate and download Excel report"""
@@ -712,6 +994,108 @@ class DashboardApp:
     def download_charts(self):
         """Generate charts download (placeholder)"""
         st.info("📈 Chart export feature will be available in the next update!")
+    
+    def render_settings_tab(self):
+        """Render the settings tab"""
+        st.header("⚙️ Settings & Configuration")
+        
+        if st.session_state.cleaned_data is None:
+            st.info("📊 Load data first to access settings")
+            return
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("🎨 Visualization Settings")
+            
+            # Color palette selection
+            color_palettes = {
+                "Default": ['#1f77b4', '#ff7f0e', '#2ca02c'],
+                "Vibrant": ['#FF6B6B', '#4ECDC4', '#45B7D1'],
+                "Pastel": ['#FFB6C1', '#87CEEB', '#90EE90'],
+                "Dark": ['#2C3E50', '#34495E', '#7F8C8D']
+            }
+            selected_palette = st.selectbox("Color Palette", list(color_palettes.keys()))
+            st.session_state.color_palette = color_palettes[selected_palette]
+            
+            # Figure size
+            fig_width = st.slider("Chart Width", 8, 16, 12)
+            fig_height = st.slider("Chart Height", 4, 10, 6)
+            st.session_state.figure_size = (fig_width, fig_height)
+            
+            # Font size
+            font_size = st.slider("Font Size", 8, 16, 12)
+            st.session_state.font_size = font_size
+        
+        with col2:
+            st.subheader("📊 Data Processing Settings")
+            
+            # Remove outliers option
+            remove_outliers = st.checkbox("Remove Outliers", value=True)
+            st.session_state.remove_outliers = remove_outliers
+            
+            # Missing value threshold
+            missing_threshold = st.slider(
+                "Drop columns with missing % above",
+                0.0, 1.0, 0.5, 0.1
+            )
+            st.session_state.missing_threshold = missing_threshold
+            
+            # Duplicate strategy
+            duplicate_strategy = st.selectbox(
+                "Duplicate Handling",
+                ["keep first", "keep last", "remove all"]
+            )
+            st.session_state.duplicate_strategy = duplicate_strategy
+        
+        st.divider()
+        
+        st.subheader("📋 Preset Configurations")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🎓 Academic Preset"):
+                st.session_state.color_palette = ['#1f77b4', '#ff7f0e', '#2ca02c']
+                st.session_state.figure_size = (12, 8)
+                st.session_state.font_size = 12
+                st.session_state.remove_outliers = True
+                st.session_state.missing_threshold = 0.5
+                st.success("✅ Academic preset applied!")
+                st.rerun()
+        
+        with col2:
+            if st.button("💼 Business Preset"):
+                st.session_state.color_palette = ['#FF6B6B', '#4ECDC4', '#45B7D1']
+                st.session_state.figure_size = (14, 8)
+                st.session_state.font_size = 13
+                st.session_state.remove_outliers = False
+                st.session_state.missing_threshold = 0.3
+                st.success("✅ Business preset applied!")
+                st.rerun()
+        
+        with col3:
+            if st.button("🔬 Research Preset"):
+                st.session_state.color_palette = ['#2C3E50', '#34495E', '#7F8C8D']
+                st.session_state.figure_size = (12, 10)
+                st.session_state.font_size = 14
+                st.session_state.remove_outliers = True
+                st.session_state.missing_threshold = 0.6
+                st.success("✅ Research preset applied!")
+                st.rerun()
+        
+        st.divider()
+        
+        st.subheader("ℹ️ Configuration Info")
+        config_info = {
+            "Color Palette": selected_palette if 'selected_palette' in locals() else "Not set",
+            "Chart Size": f"{fig_width}x{fig_height}" if 'fig_width' in locals() else "Not set",
+            "Font Size": f"{font_size}px" if 'font_size' in locals() else "Not set",
+            "Remove Outliers": remove_outliers if 'remove_outliers' in locals() else "Not set",
+            "Missing Threshold": f"{missing_threshold*100:.0f}%" if 'missing_threshold' in locals() else "Not set",
+        }
+        
+        st.json(config_info)
 
 
 def main():

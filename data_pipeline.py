@@ -192,11 +192,24 @@ class DataCleaningPipeline:
                 
                 # Check if it's actually datetime
                 try:
-                    if any(keyword in column.lower() for keyword in ['date', 'time', 'created', 'updated']):
-                        df[column] = pd.to_datetime(df[column], errors='coerce')
+                    if any(keyword in column.lower() for keyword in ['date', 'time', 'created', 'updated', 'hire', 'birth', 'start', 'end']):
+                        df[column] = pd.to_datetime(df[column], errors='coerce', utc=True)
                         logger.info(f"Converted '{column}' to datetime type")
-                except:
-                    pass
+                        
+                        # Clean invalid dates (future dates, very old dates)
+                        current_year = pd.Timestamp.now().year
+                        future_mask = df[column].dt.year > (current_year + 10)
+                        old_mask = df[column].dt.year < 1950
+                        
+                        if future_mask.any():
+                            df.loc[future_mask, column] = pd.Timestamp.now()
+                            logger.warning(f"Fixed {future_mask.sum()} future dates in '{column}'")
+                        
+                        if old_mask.any():
+                            df.loc[old_mask, column] = pd.NaT
+                            logger.warning(f"Cleaned {old_mask.sum()} old dates in '{column}'")
+                except Exception as e:
+                    logger.debug(f"Could not convert '{column}' to datetime: {e}")
         
         return df
     
